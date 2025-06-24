@@ -16,7 +16,7 @@ const registerUser = asyncHandler(async (req,res)=>{    //It takes a function as
             // return response 
 
             const {username,email,fullname ,password} = req.body
-            console.log("email",email);
+            // console.log("email",email);
             if(fullname === ""){
                 throw new apiError(400,"fullname is required")
             }
@@ -30,7 +30,7 @@ const registerUser = asyncHandler(async (req,res)=>{    //It takes a function as
                 throw new apiError(400, "email is required")
             }
 
-            const existedUser = User.findOne(
+            const existedUser = await User.findOne(
                 {
                     $or:[{username},{email}]
                 }
@@ -42,25 +42,27 @@ const registerUser = asyncHandler(async (req,res)=>{    //It takes a function as
            const coverimageLocalPath =  req.files?.coverimage[0]?.path;
 
            if(!avatarLocalPath){
-            throw apiError(400,"avatar file is required")
+            throw new apiError(400,"avatar file is required")
            }
            const avatar = await uploadOnCloudinary(avatarLocalPath)
+           console.log("Uploaded Avatar from Cloudinary:", avatar);
+
            const coverimage = await uploadOnCloudinary(coverimageLocalPath)
 
            if(!avatar){
-            throw apiError(400,"avatar file is required")
+            throw new apiError(400,"avatar file is required....")
            }
 
-            const User = await User.create({
+            const user = await User.create({
             fullname,
             avatar:avatar.url, 
             coverimage:coverimage?.url || "",
             email,
             password,
-            username:username.toLowerCase()
+            username :username.toLowerCase()
            })
 
-           const createdUser = await User.findById(User._id).select(
+           const createdUser = await User.findById(user._id).select(
             "-password -refreshToken"
            )
            if(!createdUser){
