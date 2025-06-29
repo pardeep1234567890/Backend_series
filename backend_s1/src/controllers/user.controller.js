@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { apiResponse } from "../utils/apiResponse.js";
 import jwt from "jsonwebtoken"
+import mongoose, { Aggregate, Mongoose } from "mongoose";
 
 const registerUser = asyncHandler(async (req, res) => {    //It takes a function as input (requestHandler) // That input is your actual async route handler
     // get user details from frontend 
@@ -224,69 +225,200 @@ const changePassword = asyncHandler(async (req, res) => {
         .json(new apiResponse(200, {}, "Password changed successfully"))
 })
 
-// Here we Access the CurrentUser
-const getCurrentUser = asyncHandler( async(req,res)=>{
-    return res 
-    .status(200)
-    .json(new apiResponse(200,req.user,"current user fetched successfully"))
+// Here we Access the CurrentUser (may be it means the Fronted user Accessing the current User)
+const getCurrentUser = asyncHandler(async (req, res) => {
+    return res
+        .status(200)
+        .json(new apiResponse(200, req.user, "current user fetched successfully"))
 })
 
 // Here we give Access to Update the User Details (If we want update the Files so make different Controllers for it)
-const updateAccountDetails = asyncHandler( async(req,res)=>{
-    const {fullname , email} = req.body
+const updateAccountDetails = asyncHandler(async (req, res) => {
+    const { fullname, email } = req.body
     if (!fullname || !email) {
         throw new ApiError(400, "All fields are required")
     }
-    const user = await User.findByIdAndUpdate(req.user?._id,{
-        $set:{
+    const user = await User.findByIdAndUpdate(req.user?._id, {
+        $set: {
             fullname,
-            email:email
+            email: email
         }
-    },{new:true}).select("-password")
+    }, { new: true }).select("-password")
     return res
-    .status(200)
-    .json(new apiResponse(200,user,"Account details updated successfully"))
+        .status(200)
+        .json(new apiResponse(200, user, "Account details updated successfully"))
 
 })
 
-const updateUserAvatar = asyncHandler( async(req,res)=>{
+// Here we update the User Avatar
+const updateUserAvatar = asyncHandler(async (req, res) => {
     const avatarLocalPath = req.file?.path
     if (!avatarLocalPath) {
         throw new ApiError(400, "avatar file is missing")
     }
     const avatar = await uploadOnCloudinary(avatarLocalPath)
-    if(!avatar.url){
+    if (!avatar.url) {
         throw new ApiError(400, "avatar is not uploaded")
     }
-    await User.findByIdAndUpdate(req.user?._id,{
-        $set:{
-            avatar :avatar.url
+    await User.findByIdAndUpdate(req.user?._id, {
+        $set: {
+            avatar: avatar.url
         }
-    },{new : true}).select("-password")
+    }, { new: true }).select("-password")
 
     return res
-    .status(200)
-    .json(new apiResponse(200,user,"avatar updated successfully"))
+        .status(200)
+        .json(new apiResponse(200, user, "avatar updated successfully"))
 })
-
-const updateUserCoverImage = asyncHandler( async(req,res)=>{
+// Here we Update the CoverImage 
+const updateUserCoverImage = asyncHandler(async (req, res) => {
     const coverImageLocalPath = req.file?.path
     if (!coverImageLocalPath) {
         throw new ApiError(400, "coverImage file is missing")
     }
     const coverimage = await uploadOnCloudinary(coverImageLocalPath)
-    if(!coverimage.url){
+    if (!coverimage.url) {
         throw new ApiError(400, "coverimage is not uploaded")
     }
-    await User.findByIdAndUpdate(req.user?._id,{
-        $set:{
-            coverimage :coverimage.url
+    await User.findByIdAndUpdate(req.user?._id, {
+        $set: {
+            coverimage: coverimage.url
         }
-    },{new : true}).select("-password")
+    }, { new: true }).select("-password")
 
     return res
-    .status(200)
-    .json(new apiResponse(200,user,"coverimage updated successfully"))
+        .status(200)
+        .json(new apiResponse(200, user, "coverimage updated successfully"))
 })
 
-export { registerUser, loginUser, logoutUser, refreshAccessToken,changePassword,getCurrentUser,updateAccountDetails,updateUserAvatar,updateUserCoverImage} 
+// Here we find the Channel details and send to the users (like how much subscribers )
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+    const { username } = req.params
+    if (!username) {
+        throw new apiError(400, "username is missing")
+    }
+    const channel = await User.aggregate([
+        {
+            $match: {                                   //$match : it is used for filtering
+                username: username?.toLowerCase()
+            }
+        },
+        {
+            $lookup: {                              //$lookup: it is used for, Joins with another collection
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribedTo"
+            }
+        },
+        {
+            //now to add these to fields in One documents 
+            $addFields: {                                 //create new fields 
+                subscribersCount: {
+                    $size: "$subscribers"    //size is used to count the subscriber here 
+                },
+                channelsSubscribedToCounts: {
+                    $size: "subscribedTo"
+                },
+                isSubscribed: {
+                    $cond: {
+                        if: { $in: [req.user?._id, "$subscribers.subscriber"] },
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        {
+            $project: {                     //$Project: Reshapes documents by including/excluding or computing fields
+                fullname: 1,
+                username: 1,
+                subscribersCount: 1,
+                channelsSubscribedToCounts: 1,
+                isSubscribed: 1,
+                email: 1,
+                coverimage: 1,
+                avatar: 1
+            }
+        }
+    ])
+    if (!channel?.length) {
+        throw new apiError(404, "Channel doesn't Exist")
+    }
+    return res
+        .status(200)
+        .json(new apiResponse(200, channel[0], "user channel fetched successfully"))
+})
+// Here we find the userWatchHistory 
+const getWatchHistory = asyncHandler(async (req, res) => {
+    // req.user?._id :- ("req.user?._id" by this we find the string not the mongodb objectid mongoose change this )mongoose change this ID(which comes from user) to the MongoDB object ID behind the scene
+    const user = await User.aggregate([
+        {
+            $match: {
+                _id: new mongoose.Types.ObjectId(req.user._id)   //( There mongoose doesn't work b/z all the aggrigation pipeline code goes directly )
+            }
+        },
+        {
+            $lookup: {                          //$lookup : It is used to Joins with another collections
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchHistory",
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "owner",
+                            foreignField: "_id",
+                            as: "owner",
+                            pipeline: [
+                                {
+                                    $project: {              //$project : reshapes every documents that flows through your aggregation pipeline
+                                        fullname: 1,
+                                        username: 1,
+                                        avatar: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $addFields: {        //$addFields:it adds one or more new fields to every document that reaches this stage of the aggregation pipeline.
+                            owner: {
+                                $first: "$owner"
+                            }
+
+                        }
+                    }
+                ]
+
+            }
+        }
+    ])
+    return res
+    .status(200)
+    .json(
+        new apiResponse(200,user[0].watchHistory,"watch history fetched successfully")
+    )
+})
+export {
+    registerUser,
+    loginUser,
+    logoutUser,
+    refreshAccessToken,
+    changePassword,
+    getCurrentUser,
+    updateAccountDetails,
+    updateUserAvatar,
+    updateUserCoverImage,
+    getUserChannelProfile,
+    getWatchHistory
+} 

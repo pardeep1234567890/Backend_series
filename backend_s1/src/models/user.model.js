@@ -30,7 +30,7 @@ const userSchema = new mongoose.Schema({
     coverimage:{
         type: String,//cloudinary url
     },
-    watchHistroy:[
+    watchHistory:[
         {
             type:mongoose.Schema.Types.ObjectId,
             ref:"Video"
